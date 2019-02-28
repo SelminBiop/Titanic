@@ -132,7 +132,7 @@ def train_model(
     steps_per_period = steps_val / periods
 
 # Architecture of our Neural Network
-    hidden_units = [2, 4, 7]
+    hidden_units = [5]
 
     my_optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
     my_optimizer = tf.contrib.estimator.clip_gradients_by_norm(my_optimizer, 5.0)
