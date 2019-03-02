@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn import metrics
 import tensorflow as tf
+from DataWrangler import DataWrangler
 from tensorflow.python.data import Dataset
 
 PATH = "data/train.csv"
@@ -24,56 +25,6 @@ print(titanic_passenger_dataframe.describe())
 
 # ToDo : All the data analyzing stuff
 
-# Some age entries are missing so we'll replace them with the average
-# ToDo : Instead of using the mean, we could try to get an average age from Titles present in the names and assign
-#  these age values instead (separate people in categories)
-mean_age = np.mean(titanic_passenger_dataframe["Age"])
-titanic_passenger_dataframe["Age"].fillna(mean_age, inplace=True)
-
-# Also, let's transform them into age categories. It makes more sense that way
-# ToDo : After careful data analysis try to find best age categories
-titanic_passenger_dataframe["Age"] = titanic_passenger_dataframe["Age"].astype(np.int64)
-titanic_passenger_dataframe["Age"] = titanic_passenger_dataframe["Age"].apply(
-    lambda age:
-    1 if age < 10 else
-    2 if 10 <= age < 18 else
-    3 if 18 <= age < 25 else
-    4 if 25 <= age < 30 else
-    5 if 30 <= age < 35 else
-    6 if 35 <= age < 45 else
-    7
-)
-
-# Some Embarked entries are missing, let's try and replace them with where most of the people embarked from
-# ToDo : Would it be possible to do something similar to Age?
-titanic_passenger_dataframe["Embarked"].fillna(
-    titanic_passenger_dataframe["Embarked"].value_counts().index[0],
-    inplace=True
-)
-
-# The cabin (first letter) can be indicative of where someone was situated, close to a life boat maybe?
-# We fill with U for unknown
-titanic_passenger_dataframe["Cabin"].fillna("U", inplace=True)
-titanic_passenger_dataframe["Cabin"] = titanic_passenger_dataframe["Cabin"].apply(lambda cabin: cabin[0])
-
-# Let's engineer two new features, FamilySize and if the passenger was alone or not (could influence how easy it was
-# to find a place on a boat for everyone)
-titanic_passenger_dataframe["FamilySize"] = titanic_passenger_dataframe["SibSp"] + titanic_passenger_dataframe["Parch"]
-
-# IsAlone is a bit more complicated since a child could be accompanied by a nanny or an aunt but still have a
-# FamilySize of 0, we'll assume that everyone under the age of 18 was accompanied
-titanic_passenger_dataframe["IsAlone"] = titanic_passenger_dataframe["FamilySize"].apply(lambda fam_size: 0 if fam_size > 0 else 1)
-is_old_enough = titanic_passenger_dataframe["Age"].apply(lambda age: 0 if age < 18 else 1)
-titanic_passenger_dataframe["IsAlone"] = titanic_passenger_dataframe["IsAlone"] * is_old_enough
-
-# Transformation for the benefit of Tensorflow
-titanic_passenger_dataframe["Pclass"].apply(np.int64)
-
-# ToDo : All the transformations should be applied on the test set (define a function)
-titanic_passenger_test_dataframe["Age"].fillna(mean_age, inplace=True)
-titanic_passenger_test_dataframe["Pclass"].apply(np.int64)
-titanic_passenger_test_dataframe["Age"] = titanic_passenger_dataframe["Age"].astype(np.int64)
-
 
 def preprocess_features(dataframe):
     selected_features = dataframe[
@@ -81,10 +32,17 @@ def preprocess_features(dataframe):
          "Pclass",
          "Sex",
          "IsAlone",
-         "FamilySize"]]
+         "FamilySize",
+         "Embarked",
+         "Cabin",
+         "Title",
+         "Fare"]]
     processed_features = selected_features.copy()
     return processed_features
 
+
+titanic_data_wrangler = DataWrangler()
+titanic_passenger_dataframe = titanic_data_wrangler.wrangle(titanic_passenger_dataframe)
 
 # We separate the dataset in a training and validation set to verify if our model generalizes well (no overfiting)
 train_examples = preprocess_features(titanic_passenger_dataframe.head(700))
@@ -114,9 +72,11 @@ categorical_features = [tf.feature_column.indicator_column(tf.feature_column.cat
                        + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Pclass", hash_bucket_size=3, dtype=tf.int64))] \
                        + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Sex", hash_bucket_size=2))] \
                        + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("IsAlone", hash_bucket_size=2, dtype=tf.int64))]\
-                       + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("FamilySize", hash_bucket_size=20, dtype=tf.int64))]
-                       #+ [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Embarked", hash_bucket_size=3))]\
-                       #+ [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Cabin", hash_bucket_size=9))]
+                       + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("FamilySize", hash_bucket_size=11, dtype=tf.int64))]\
+                       + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Embarked", hash_bucket_size=3))]\
+                       + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Cabin", hash_bucket_size=9))]\
+                       + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Title", hash_bucket_size=6))]\
+                       + [tf.feature_column.indicator_column(tf.feature_column.categorical_column_with_hash_bucket("Fare", hash_bucket_size=4, dtype=tf.int64))]
 
 
 def train_model(
@@ -132,7 +92,7 @@ def train_model(
     steps_per_period = steps_val / periods
 
 # Architecture of our Neural Network
-    hidden_units = [5]
+    hidden_units = [9, 5, 3]
 
     my_optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
     my_optimizer = tf.contrib.estimator.clip_gradients_by_norm(my_optimizer, 5.0)
@@ -230,7 +190,7 @@ def evaluate_model(learn_rate, steps_val, batch_size_val, print_results=False):
 # Play with these (you can also try to change the architecture of the DNN) and try to consistently get a good accuracy,
 # auc, precision and recall score (mostly accuracy in this case)
 evaluate_model(
-    learn_rate=0.00003,
+    learn_rate=0.00005,
     steps_val=500000,
     batch_size_val=5,
     print_results=True
