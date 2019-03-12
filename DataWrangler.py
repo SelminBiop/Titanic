@@ -4,6 +4,15 @@ import numpy as np
 class DataWrangler:
 
     def wrangle(self, dataframe):
+        # Let's engineer two new features, FamilySize and if the passenger was alone or not (could influence how easy it was
+        # to find a place on a boat for everyone)
+        dataframe["FamilySize"] = dataframe["SibSp"] + dataframe["Parch"]
+        # IsAlone is a bit more complicated since a child could be accompanied by a nanny or an aunt but still have a
+        # FamilySize of 0, we'll assume that everyone under the age of 18 was accompanied
+        dataframe["IsAlone"] = dataframe["FamilySize"].apply(lambda fam_size: 0 if fam_size > 0 else 1)
+        is_old_enough = dataframe["Age"].apply(lambda age: 0 if age < 18 else 1)
+        dataframe["IsAlone"] = dataframe["IsAlone"] * is_old_enough
+
         # Taken from https://medium.com/i-like-big-data-and-i-cannot-lie/how-i-scored-in-the-top-9-of-kaggles-titanic-machine-learning-challenge-243b5f45c8e9
         # but I don't really like it. Too many assumptions. Same with normalized titles, what if a title is not in our map...
         dataframe["Title"] = dataframe["Name"].apply(
@@ -68,15 +77,6 @@ class DataWrangler:
         # We fill with U for unknown
         dataframe["Cabin"].fillna("U", inplace=True)
         dataframe["Cabin"] = dataframe["Cabin"].apply(lambda cabin: cabin[0])
-
-        # Let's engineer two new features, FamilySize and if the passenger was alone or not (could influence how easy it was
-        # to find a place on a boat for everyone)
-        dataframe["FamilySize"] = dataframe["SibSp"] + dataframe["Parch"]
-        # IsAlone is a bit more complicated since a child could be accompanied by a nanny or an aunt but still have a
-        # FamilySize of 0, we'll assume that everyone under the age of 18 was accompanied
-        dataframe["IsAlone"] = dataframe["FamilySize"].apply(lambda fam_size: 0 if fam_size > 0 else 1)
-        is_old_enough = dataframe["Age"].apply(lambda age: 0 if age < 18 else 1)
-        dataframe["IsAlone"] = dataframe["IsAlone"] * is_old_enough
 
         # Transformation for the benefit of Tensorflow
         dataframe["Pclass"].apply(np.int64)

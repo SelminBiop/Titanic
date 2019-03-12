@@ -10,6 +10,7 @@ from tensorflow.python.data import Dataset
 
 PATH = "data/train.csv"
 TEST_PATH = "data/test.csv"
+RESULT_PATH = "data/submission.csv"
 
 titanic_passenger_dataframe = pd.read_csv(PATH, sep=",")
 titanic_passenger_test_dataframe = pd.read_csv(TEST_PATH, sep=",")
@@ -52,17 +53,22 @@ validation_examples = preprocess_features(titanic_passenger_dataframe.tail(191))
 validation_targets = titanic_passenger_dataframe["Survived"].tail(191)
 
 
-def my_input_fn(features, targets, batch_size_val=1, shuffle=True, num_epochs=None):
+def my_input_fn(features, targets=None, batch_size_val=1, shuffle=True, num_epochs=None):
     features = {key: np.array(value) for key, value in dict(features).items()}
 
-    ds = Dataset.from_tensor_slices((features, targets))
+    if targets is None:
+        # No labels, use only features.
+        inputs = features
+    else:
+        inputs = (features, targets)
+
+    ds = Dataset.from_tensor_slices(inputs)
     ds = ds.batch(batch_size_val).repeat(num_epochs)
 
     if shuffle:
         ds = ds.shuffle(10000)
 
-    features, labels = ds.make_one_shot_iterator().get_next()
-    return features, labels
+    return ds.make_one_shot_iterator().get_next()
 
 
 # We need to tranform the different features so it can be consumed by our tensorflow model. All our features are
@@ -92,7 +98,7 @@ def train_model(
     steps_per_period = steps_val / periods
 
 # Architecture of our Neural Network
-    hidden_units = [9, 5, 3]
+    hidden_units = [9, 3, 1]
 
     my_optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
     my_optimizer = tf.contrib.estimator.clip_gradients_by_norm(my_optimizer, 5.0)
@@ -160,18 +166,8 @@ def train_model(
     return linear_classifier
 
 
-def evaluate_model(learn_rate, steps_val, batch_size_val, print_results=False):
-    linear_classifier = train_model(
-        learn_rate=learn_rate,
-        steps_val=steps_val,
-        batch_size_val=batch_size_val,
-        training_examples=train_examples,
-        training_targets=train_targets,
-        val_examples=validation_examples,
-        val_targets=validation_targets
-    )
-
-    evaluation_metrics = linear_classifier.evaluate(input_fn=lambda: my_input_fn(
+def evaluate_model(model, print_results=False):
+    evaluation_metrics = model.evaluate(input_fn=lambda: my_input_fn(
         validation_examples,
         validation_targets,
         num_epochs=1,
@@ -179,7 +175,6 @@ def evaluate_model(learn_rate, steps_val, batch_size_val, print_results=False):
     ))
 
     if print_results:
-        print("Learning rate: %0.5f, Steps: %d, Batch size: %d" % (learn_rate, steps_val, batch_size_val))
         print("AUC on the validation set: %0.2f" % evaluation_metrics['auc'])
         print("Accuracy on the validation set: %0.2f" % evaluation_metrics['accuracy'])
         print(evaluation_metrics)
@@ -189,9 +184,34 @@ def evaluate_model(learn_rate, steps_val, batch_size_val, print_results=False):
 
 # Play with these (you can also try to change the architecture of the DNN) and try to consistently get a good accuracy,
 # auc, precision and recall score (mostly accuracy in this case)
-evaluate_model(
+
+linear_classifier = train_model(
     learn_rate=0.00005,
     steps_val=500000,
     batch_size_val=5,
+    training_examples=train_examples,
+    training_targets=train_targets,
+    val_examples=validation_examples,
+    val_targets=validation_targets
+)
+
+evaluate_model(
+    model=linear_classifier,
     print_results=True
 )
+
+test_passenger_ids = titanic_passenger_test_dataframe["PassengerId"]
+titanic_passenger_test_dataframe = titanic_data_wrangler.wrangle(titanic_passenger_test_dataframe)
+results = linear_classifier.predict(
+    input_fn=lambda: my_input_fn(
+        features=preprocess_features(titanic_passenger_test_dataframe),
+        num_epochs=1,
+        shuffle=False
+    )
+)
+results = [result["class_ids"][0] for result in results]
+submission = pd.DataFrame({
+    "PassengerId": test_passenger_ids,
+    "Survived": results
+})
+submission.to_csv(RESULT_PATH, index=False)

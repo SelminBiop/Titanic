@@ -6,7 +6,6 @@ from DataWrangler import DataWrangler
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.preprocessing import LabelEncoder
-from scipy import stats
 
 PATH = "data/train.csv"
 TEST_PATH = "data/test.csv"
@@ -27,19 +26,7 @@ print(titanic_passenger_dataframe.describe())
 
 titanic_data_wrangler = DataWrangler()
 titanic_passenger_dataframe = titanic_data_wrangler.wrangle(titanic_passenger_dataframe)
-
-label_encoder = LabelEncoder()
-# This step is broken as !"/$%
-# Todo : FIX
-titanic_passenger_dataframe["Age"] = keras.utils.to_categorical(titanic_passenger_dataframe["Age"])
-titanic_passenger_dataframe["Pclass"] = keras.utils.to_categorical(titanic_passenger_dataframe["Pclass"])
-titanic_passenger_dataframe["IsAlone"] = keras.utils.to_categorical(titanic_passenger_dataframe["IsAlone"])
-titanic_passenger_dataframe["FamilySize"] = keras.utils.to_categorical(titanic_passenger_dataframe["FamilySize"])
-titanic_passenger_dataframe["Fare"] = keras.utils.to_categorical(titanic_passenger_dataframe["Fare"])
-titanic_passenger_dataframe["Sex"] = keras.utils.to_categorical(label_encoder.fit_transform(titanic_passenger_dataframe["Sex"]))
-titanic_passenger_dataframe["Embarked"] = keras.utils.to_categorical(label_encoder.fit_transform(titanic_passenger_dataframe["Embarked"]))
-titanic_passenger_dataframe["Cabin"] = keras.utils.to_categorical(label_encoder.fit_transform(titanic_passenger_dataframe["Cabin"]))
-titanic_passenger_dataframe["Title"] = keras.utils.to_categorical(label_encoder.fit_transform(titanic_passenger_dataframe["Title"]))
+titanic_passenger_test_dataframe = titanic_data_wrangler.wrangle(titanic_passenger_test_dataframe)
 
 def train_model(
         learn_rate,
@@ -50,14 +37,10 @@ def train_model(
         val_examples,
         val_targets
 ):
-    print(stats.describe(training_examples))
-    print(stats.describe(training_targets))
-    print(stats.describe(val_examples))
-    print(stats.describe(val_targets))
 
     model = keras.Sequential([
-        keras.layers.Dense(5, activation=tf.nn.relu, activity_regularizer=keras.regularizers.l1(0.01)),
-        keras.layers.Dense(3, activation=tf.nn.relu, activity_regularizer=keras.regularizers.l2(0.01))
+        keras.layers.Dense(9, activation=tf.nn.relu, activity_regularizer=keras.regularizers.l2(0.001)),
+        keras.layers.Dense(3, activation=tf.nn.relu, activity_regularizer=keras.regularizers.l1(0.001))
     ])
 
     sgd = keras.optimizers.SGD(lr=learn_rate)
@@ -88,17 +71,41 @@ data_length = len(titanic_passenger_dataframe.index)
 train_ratio = 0.8
 head_value = int(data_length * train_ratio)
 
-train_examples = titanic_passenger_dataframe.head(head_value).drop("Survived", axis=1)
-print(train_examples["Age"])
+
+def transform_categorical(dataframe):
+    label_encoder = LabelEncoder()
+    result_list = [
+        np.array([keras.utils.to_categorical(dataframe["Pclass"])]),
+        np.array([keras.utils.to_categorical(dataframe["Age"])]),
+        np.array([keras.utils.to_categorical(dataframe["IsAlone"])]),
+        np.array([keras.utils.to_categorical(dataframe["Fare"])]),
+        np.array([keras.utils.to_categorical(dataframe["FamilySize"])]),
+        np.array([keras.utils.to_categorical(label_encoder.fit_transform(dataframe["Sex"]))]),
+        np.array([keras.utils.to_categorical(label_encoder.fit_transform(dataframe["Embarked"]))]),
+        np.array([keras.utils.to_categorical(label_encoder.fit_transform(dataframe["Cabin"]))]),
+        np.array([keras.utils.to_categorical(label_encoder.fit_transform(dataframe["Title"]))]),
+    ]
+
+    return result_list
+
+
+titanic_train = transform_categorical(titanic_passenger_dataframe.drop("Survived", axis=1).head(head_value))
+titanic_train_target = np.array([keras.utils.to_categorical(titanic_passenger_dataframe["Survived"].head(head_value))])
+
+titanic_validation = transform_categorical(titanic_passenger_dataframe.drop("Survived", axis=1).tail(data_length - head_value))
+titanic_validation_target = np.array([keras.utils.to_categorical(titanic_passenger_dataframe["Survived"].tail(data_length - head_value))])
 
 # Play with these (you can also try to change the architecture of the DNN) and try to consistently get a good accuracy,
 # auc, precision and recall score (mostly accuracy in this case)
-train_model(
-    learn_rate=0.5,
+martin = train_model(
+    learn_rate=0.00005,
     batch_size_val=5,
-    epoch_val=500,
-    training_examples=train_examples.values,
-    training_targets=titanic_passenger_dataframe["Survived"].head(head_value).values,
-    val_examples=titanic_passenger_dataframe.tail(data_length - head_value).drop("Survived", axis=1).values,
-    val_targets=titanic_passenger_dataframe["Survived"].tail(data_length - head_value).values
-)
+    epoch_val=100,
+    training_examples=titanic_train,
+    training_targets=titanic_train_target,
+    val_examples=titanic_validation,
+    val_targets=titanic_validation_target
+ )
+
+pred = martin.predict(transform_categorical(titanic_passenger_test_dataframe))
+print(pred)
